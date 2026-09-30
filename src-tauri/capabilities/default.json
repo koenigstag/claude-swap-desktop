@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The popover window: core IPC and events only. App commands are defined in src/main.rs.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

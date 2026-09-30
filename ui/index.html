@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Claude Swap</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header data-tauri-drag-region>
+      <div class="title" data-tauri-drag-region>
+        <strong>Claude Swap</strong>
+        <span id="default-login" class="muted"></span>
+      </div>
+      <div class="tools">
+        <button id="btn-lock" class="icon" title="Locked: switching is disabled"></button>
+        <button id="btn-pin" class="icon" title="Keep open when focus moves away">📌</button>
+        <button id="btn-tui" class="icon mono" title="Open the claude-swap dashboard (TUI)">&gt;_</button>
+        <button id="btn-refresh" class="icon" title="Refresh">⟳</button>
+        <button id="btn-close" class="icon" title="Hide">✕</button>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="profiles">Profiles</button>
+      <button role="tab" data-tab="mappings">Mappings <span id="mappings-count" class="count"></span></button>
+    </nav>
+
+    <main>
+      <div id="warnings"></div>
+      <div id="tab-profiles" role="tabpanel">
+        <div id="accounts"><p class="muted center">Loading…</p></div>
+      </div>
+      <div id="tab-mappings" role="tabpanel" hidden>
+        <div class="toolbar">
+          <button id="btn-map-add" class="primary">+ Add mapping</button>
+        </div>
+        <div id="mappings"></div>
+        <p class="muted note">
+          A mapping picks the account <code>claude-swap run</code> uses in that folder, which is also what the
+          VS Code wrapper launches. Add or remove them with <code>claude-swap map</code> and
+          <code>claude-swap unmap</code>.
+        </p>
+      </div>
+    </main>
+
+    <footer>
+      <span id="updated" class="muted"></span>
+      <button id="btn-quit" class="link">Quit</button>
+    </footer>
+
+    <!-- Confirm switch -->
+    <section id="sheet-switch" class="sheet" hidden>
+      <h2>Switch default login?</h2>
+      <p id="switch-text"></p>
+      <p id="switch-sessions" class="warn" hidden></p>
+      <div class="actions">
+        <button id="switch-cancel">Cancel</button>
+        <button id="switch-go" class="primary">Switch</button>
+      </div>
+    </section>
+
+    <!-- Add / change mapping -->
+    <section id="sheet-map" class="sheet" hidden>
+      <h2 id="map-title">Add mapping</h2>
+      <label class="field">
+        <span>Folder</span>
+        <span class="row">
+          <input id="map-path" type="text" readonly placeholder="Choose a folder…" />
+          <button id="map-choose">Choose…</button>
+        </span>
+      </label>
+      <label class="field">
+        <span>Account</span>
+        <select id="map-account"></select>
+      </label>
+      <ul id="map-notes" class="notes"></ul>
+      <p id="map-error" class="error" hidden></p>
+      <div class="actions">
+        <button id="map-cancel">Cancel</button>
+        <button id="map-save" class="primary" disabled>Save</button>
+      </div>
+    </section>
+
+    <!-- Remove mapping -->
+    <section id="sheet-unmap" class="sheet" hidden>
+      <h2>Remove mapping?</h2>
+      <p id="unmap-text"></p>
+      <p id="unmap-fallback" class="muted"></p>
+      <p id="unmap-error" class="error" hidden></p>
+      <div class="actions">
+        <button id="unmap-cancel">Cancel</button>
+        <button id="unmap-go" class="danger">Remove</button>
+      </div>
+    </section>
+
+    <!-- Re-login -->
+    <section id="sheet-relogin" class="sheet" hidden>
+      <h2 id="relogin-title">Re-login</h2>
+      <div id="relogin-intro">
+        <p>
+          A terminal window opens with <code>claude auth login</code>. Sign in there as
+          <strong id="relogin-email"></strong>. The app then checks the right account signed in,
+          runs <code>claude-swap add</code> and confirms the token status.
+        </p>
+        <label class="check">
+          <input type="checkbox" id="relogin-restore" checked />
+          <span id="relogin-restore-label">Switch the default login back afterwards</span>
+        </label>
+        <p id="relogin-sessions" class="warn" hidden></p>
+        <div class="actions">
+          <button id="relogin-close-intro">Cancel</button>
+          <button id="relogin-start" class="primary">Start</button>
+        </div>
+      </div>
+      <div id="relogin-progress" hidden>
+        <ol id="relogin-steps"></ol>
+        <p id="relogin-result" hidden></p>
+        <div class="actions">
+          <button id="relogin-cancel">Cancel login</button>
+          <button id="relogin-done" class="primary" hidden>Done</button>
+        </div>
+      </div>
+    </section>
+
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,111 @@
+<!doctype html>
+<!--
+  Browser preview of the popover UI with a mocked Tauri API.
+  Not part of the app. Regenerate dev/mock-state.js from real output as needed.
+  ?scenario=broken shows an expired account and a signed-out default login.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Claude Swap (preview)</title>
+    <link rel="stylesheet" href="../ui/styles.css" />
+    <style>
+      html, body { height: 640px; width: 420px; }
+    </style>
+  </head>
+  <body>
+    <script src="mock-state.js"></script>
+    <script>
+      (function () {
+        const listeners = {};
+        const emit = (name, payload) => (listeners[name] || []).forEach((cb) => cb({ payload }));
+        const state = structuredClone(window.MOCK_STATE);
+        state.fetchedAt = Date.now();
+        // Shaped like mappings.json (lowercased keys) plus the on-disk casing the
+        // backend resolves. The default-login account is mapped too, so the
+        // shared-token warning shows.
+        const [a1, a2] = state.list.accounts;
+        state.mappings = [
+          { path: 'd:\\projects', displayPath: 'D:\\Projects', exists: true, email: a2.email },
+          { path: 'd:\\projects\\work', displayPath: 'D:\\Projects\\Work', exists: true, email: a1.email },
+          { path: 'd:\\projects\\work\\client-app', displayPath: 'D:\\Projects\\Work\\client-app', exists: true, email: a1.email },
+        ];
+
+        if (new URLSearchParams(location.search).get('scenario') === 'broken') {
+          const t = state.tokens.find((t) => t.number === 1);
+          t.lines = [
+            { source: 'session profile', state: 'expired', refresh: false, expires: 'Jan 1 02:00 in 0m' },
+            { source: 'stored backup', state: 'expired', refresh: true, expires: 'Sep 28 23:59 in 0m' },
+          ];
+          state.defaultLogin = { loggedIn: false };
+        }
+
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        async function fakeRelogin({ number }) {
+          const acct = state.list.accounts.find((a) => a.number === number);
+          const steps = [
+            ['prepare', 'done', `Account ${number} (${acct.email}); default login is account 2`],
+            ['backup', 'done', `Saved account 2 (${state.list.accounts[1].email})`],
+            ['login', 'running', `Sign in as ${acct.email} in the terminal window, then close it if it stays open`],
+            ['login', 'done', 'Login window closed'],
+            ['verify', 'done', `Signed in as ${acct.email} (${acct.organizationName})`],
+            ['save', 'done', `Updated credentials for Account ${number} (${acct.email} [${acct.organizationName}])`],
+            ['restore', 'done', 'Default login is account 2 again'],
+            ['confirm', 'done', 'Account 1 is signed in again: stored backup is fresh, refresh token yes, expires 23:10 in 7h 59m'],
+          ];
+          for (const [step, status, detail] of steps) {
+            emit('relogin-progress', { step, status: 'running', detail });
+            await wait(step === 'login' && status === 'running' ? 1500 : 400);
+            if (status !== 'running') emit('relogin-progress', { step, status, detail });
+          }
+          return { ok: true, message: steps.at(-1)[2], tokenLines: [] };
+        }
+
+        window.__TAURI__ = {
+          core: {
+            invoke: async (cmd, args) => {
+              switch (cmd) {
+                case 'get_state': await wait(200); return state;
+                case 'relogin': return fakeRelogin(args);
+                case 'switch_account': await wait(500); return {};
+                case 'pick_folder': await wait(300); return 'D:\\Projects\\side-project';
+                case 'map_folder': {
+                  await wait(400);
+                  const acct = state.list.accounts.find((a) => a.number === args.number);
+                  const key = args.path.toLowerCase();
+                  state.mappings = state.mappings.filter((m) => m.path !== key);
+                  state.mappings.push({ path: key, displayPath: args.path, exists: true, email: acct.email });
+                  state.mappings.sort((a, b) => a.path.localeCompare(b.path));
+                  return state.mappings;
+                }
+                case 'unmap_folder':
+                  await wait(400);
+                  state.mappings = state.mappings.filter((m) => m.path !== args.path);
+                  return state.mappings;
+                default: return null;
+              }
+            },
+          },
+          event: {
+            listen: async (name, cb) => {
+              (listeners[name] ||= []).push(cb);
+              return () => {};
+            },
+          },
+        };
+      })();
+    </script>
+    <!-- The real popover markup, loaded from ui/index.html -->
+    <script>
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', '../ui/index.html', false);
+      try { xhr.send(); } catch (e) { document.body.append('Serve this folder over http to preview: ' + e); }
+      const doc = new DOMParser().parseFromString(xhr.responseText, 'text/html');
+      doc.querySelectorAll('script').forEach((s) => s.remove());
+      document.body.append(...doc.body.childNodes);
+      const s = document.createElement('script');
+      s.src = '../ui/app.js';
+      document.body.append(s);
+    </script>
+  </body>
+</html>

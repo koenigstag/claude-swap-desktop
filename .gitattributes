@@ -1,0 +1,10 @@
+# Normalize text to LF in the repo and in working copies, whatever core.autocrlf says.
+* text=auto eol=lf
+
+# Windows scripts need CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.ico binary
+*.icns binary

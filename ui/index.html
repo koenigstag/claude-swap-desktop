@@ -17,6 +17,7 @@
         <button id="btn-pin" class="icon" title="Keep open when focus moves away">📌</button>
         <button id="btn-tui" class="icon mono" title="Open the claude-swap dashboard (TUI)">&gt;_</button>
         <button id="btn-refresh" class="icon" title="Refresh">⟳</button>
+        <button id="btn-settings" class="icon" title="Settings">⚙</button>
         <button id="btn-close" class="icon" title="Hide">✕</button>
       </div>
     </header>
@@ -46,13 +47,7 @@
 
     <footer>
       <span id="updated" class="muted"></span>
-      <span class="footer-right">
-        <label class="check inline" id="autostart-label">
-          <input type="checkbox" id="autostart" />
-          <span>Start with Windows</span>
-        </label>
-        <button id="btn-quit" class="link">Quit</button>
-      </span>
+      <button id="btn-quit" class="link">Quit</button>
     </footer>
 
     <!-- Confirm switch -->
@@ -63,6 +58,48 @@
       <div class="actions">
         <button id="switch-cancel">Cancel</button>
         <button id="switch-go" class="primary">Switch</button>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="sheet-settings" class="sheet" hidden>
+      <h2>Settings</h2>
+      <label class="check" id="autostart-label">
+        <input type="checkbox" id="autostart" />
+        <span>Start with Windows</span>
+      </label>
+
+      <h3 class="sub">Notifications</h3>
+      <label class="check">
+        <input type="checkbox" data-setting="notifications" />
+        <span>Show Windows notifications</span>
+      </label>
+      <div class="indent" id="notify-types">
+        <label class="check">
+          <input type="checkbox" data-setting="notifyRelogin" />
+          <span>An account needs re-login</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-setting="notifyLimits" />
+          <span>A plan limit is used up, and whether credits take over</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-setting="notifyCredits" />
+          <span>Credits pass 80% or run out</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-setting="notifyLogin" />
+          <span>The default login changes, signs out, or shares its token</span>
+        </label>
+      </div>
+      <p class="muted">
+        Checked every 5 minutes in the background and whenever this window refreshes. Each problem is announced
+        once, and again only if it comes back after clearing.
+      </p>
+      <p id="settings-status" class="muted" hidden></p>
+      <div class="actions">
+        <button id="btn-test-notification">Send a test notification</button>
+        <button id="settings-done" class="primary">Done</button>
       </div>
     </section>
 

@@ -78,6 +78,9 @@
                 case 'relogin': return fakeRelogin(args);
                 case 'switch_account': await wait(500); return {};
                 case 'get_autostart': return { installed: true, enabled: true };
+                case 'get_settings': return { ...(window.MOCK_SETTINGS ||= { notifications: true, notifyRelogin: true, notifyLimits: true, notifyCredits: true, notifyLogin: true }) };
+                case 'set_settings': Object.assign(window.MOCK_SETTINGS, args.patch); return { ...window.MOCK_SETTINGS };
+                case 'test_notification': return null;
                 case 'set_autostart': return args.enabled;
                 case 'pick_folder': await wait(300); return 'D:\\Projects\\side-project';
                 case 'map_folder': {

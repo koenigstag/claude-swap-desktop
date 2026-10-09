@@ -75,6 +75,22 @@ Installer (NSIS):
 npm run build
 ```
 
+## Notifications
+
+A background check runs every 5 minutes, and also whenever the popover refreshes. It shows a Windows notification
+when:
+
+| Notification | When |
+|---|---|
+| Account N needs re-login | any credential copy lost its refresh token (Claude Code wipes a copy only after a rejected refresh), or the copy claude-swap relies on is missing. Confirmed on two checks in a row. An expired access token that still has a refresh token ("token idle") renews on next use and isn't an alert. |
+| Account N is on credits / hit its limit | a 5h, 7d or per-model limit reaches 100% (with the credits balance, or "no credits set up") |
+| Credits at 80% / used up | extra-usage spend crosses 80% and 100% |
+| Default login changed / signed out / shared refresh token risk | `~/.claude` signs out, holds a different account than claude-swap expects, or its account is also mapped to folders |
+
+Each condition is announced once while it lasts, and again only if it clears and comes back. Turn them off as a
+whole or per type under ⚙ Settings, which also has "Send a test notification". The running app also shows a test
+notification when started again with `--test-notification`.
+
 ## Install and start with Windows
 
 Run `src-tauri\target\release\bundle\nsis\Claude Swap Desktop_<version>_x64-setup.exe`. It installs per-user (no admin)
@@ -82,8 +98,8 @@ to `%LOCALAPPDATA%\Claude Swap Desktop\`, with a Start menu shortcut and an unin
 install. To update, run a newer installer over it, after quitting the app from the tray.
 
 - **Start with Windows** is turned on automatically the first time the *installed* app runs: a per-user
-  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry named "Claude Swap Desktop". Turn it off with the
-  checkbox in the popover footer, or in Task Manager → Startup apps. Once you've turned it off, it stays off.
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry named "Claude Swap Desktop". Turn it off under
+  ⚙ Settings, or in Task Manager → Startup apps. Once you've turned it off, it stays off.
 - A build run from `src-tauri\target\…` never registers itself, because that path changes on every rebuild. The
   checkbox is disabled there.
 - **Single instance:** starting it again (Start menu or autostart) opens the running app's popover instead of adding

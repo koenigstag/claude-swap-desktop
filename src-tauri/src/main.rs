@@ -1,13 +1,17 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod alerts;
 mod cli;
 mod relogin;
 mod sessions;
+mod settings;
 mod tokens;
 
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow, WindowEvent};
@@ -26,6 +30,8 @@ struct AppState {
     dialog_open: AtomicBool,
     /// When blur last hid the popover — a tray click right after must not reopen it.
     hidden_at_ms: AtomicU64,
+    alerts: Mutex<AlertTracker>,
+    settings: Mutex<settings::Settings>,
 }
 
 struct Busy<'a>(&'a AtomicBool);
@@ -128,7 +134,7 @@ fn tray_tooltip(state: &Value) -> String {
     let active = accounts.iter().find(|a| a["active"] == Value::Bool(true));
     let mut s = match active {
         Some(a) => {
-            let usage = if a["usage"].is_object() { &a["usage"] } else { &a["lastGoodUsage"] };
+            let usage = alerts::usage_of(a);
             let pct = |k: &str| usage[k]["pct"].as_f64().map(|p| format!("{p:.0}%")).unwrap_or("–".into());
             let mut line = format!(
                 "Claude Swap — #{} {}\n5h {} · 7d {}",
@@ -142,61 +148,117 @@ fn tray_tooltip(state: &Value) -> String {
         }
         None => "Claude Swap — no active account".into(),
     };
-    let unhealthy = state["tokens"]
+    let broken = state["tokens"]
         .as_array()
-        .map(|t| {
-            t.iter()
-                .filter(|a| {
-                    let want = if a["active"] == Value::Bool(true) { "active profile" } else { "stored backup" };
-                    !a["lines"].as_array().is_some_and(|ls| {
-                        ls.iter().any(|l| {
-                            l["source"] == want && l["state"] == "fresh" && l["refresh"] == Value::Bool(true)
-                        })
-                    })
-                })
-                .count()
-        })
+        .map(|t| t.iter().filter(|a| alerts::needs_relogin(a).is_some()).count())
         .unwrap_or(0);
-    if unhealthy > 0 {
-        s.push_str(&format!("\n⚠ {unhealthy} account(s) need re-login"));
+    if broken > 0 {
+        s.push_str(&format!("\n⚠ {broken} account(s) need re-login"));
     }
     s
-}
-
-/// A plan window (5h, 7d or a per-model one) is used up.
-fn limit_spent(usage: &Value) -> bool {
-    let full = |w: &Value| w["pct"].as_f64().is_some_and(|p| p >= 100.0);
-    full(&usage["fiveHour"])
-        || full(&usage["sevenDay"])
-        || usage["scoped"].as_array().is_some_and(|s| s.iter().any(full))
-}
-
-fn money(amount: f64, currency: &str) -> String {
-    match currency {
-        "USD" | "" => format!("${amount:.2}"),
-        "EUR" => format!("€{amount:.2}"),
-        "GBP" => format!("£{amount:.2}"),
-        other => format!("{amount:.2} {other}"),
-    }
 }
 
 /// "\nCredits $19.85 / $50.00" once a limit is used up or credits were spent
 /// (claude-swap's `usage.spend`); empty otherwise.
 fn credits_line(usage: &Value) -> String {
     let spend = &usage["spend"];
-    let Some(used) = spend["used"].as_f64() else {
+    let (Some(used), Some(amount)) = (spend["used"].as_f64(), alerts::credits_amount(spend)) else {
         return String::new();
     };
-    let spent = limit_spent(usage);
+    let spent = alerts::limit_spent(usage);
     if !spent && used <= 0.0 {
         return String::new();
     }
-    let cur = spend["currency"].as_str().unwrap_or("USD");
-    let amount = match spend["limit"].as_f64().filter(|l| *l > 0.0) {
-        Some(limit) => format!("{} / {}", money(used, cur), money(limit, cur)),
-        None => format!("{} spent", money(used, cur)),
-    };
     format!("\nCredits {amount}{}", if spent { " (limit reached, on credits)" } else { "" })
+}
+
+/* ---------------------------- notifications ----------------------------- */
+
+const BACKGROUND_CHECK: Duration = Duration::from_secs(5 * 60);
+
+/// Which alert conditions are currently showing, so each is announced once
+/// while it lasts. Re-login alerts wait for a second sighting (`pending`) so
+/// a momentary glitch in token status doesn't cry wolf.
+#[derive(Default)]
+struct AlertTracker {
+    active: HashSet<String>,
+    pending: HashSet<String>,
+}
+
+fn show_notification(app: &AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app.notification().builder().title(title).body(body).show();
+}
+
+fn send_test_notification(app: &AppHandle) {
+    show_notification(
+        app,
+        "Claude Swap notifications are on",
+        "You'll be told when an account needs re-login, hits a limit or runs low on credits.",
+    );
+}
+
+fn notify_changes(app: &AppHandle, state: &Value) {
+    // Without account data nothing can be judged; keep what we had.
+    if !state["listError"].is_null() {
+        return;
+    }
+    let st = app.state::<AppState>();
+    let settings = st.settings.lock().map(|s| s.clone()).unwrap_or_default();
+    let Ok(mut tracker) = st.alerts.lock() else { return };
+
+    // Categories that couldn't be checked this round keep their last verdict.
+    let tokens_unknown = !state["tokensError"].is_null();
+    let login_unknown = !state["defaultLoginError"].is_null();
+    let carried: Vec<String> = tracker
+        .active
+        .iter()
+        .filter(|k| {
+            (tokens_unknown && k.starts_with("relogin:"))
+                || (login_unknown && (k.as_str() == "signedout" || k.starts_with("mismatch:")))
+        })
+        .cloned()
+        .collect();
+
+    let mut active = HashSet::new();
+    let mut pending = HashSet::new();
+    for alert in alerts::current(state) {
+        let confirmed = alert.kind != alerts::Kind::Relogin
+            || tracker.pending.contains(&alert.key)
+            || tracker.active.contains(&alert.key);
+        if !confirmed {
+            pending.insert(alert.key);
+            continue;
+        }
+        if !tracker.active.contains(&alert.key) && settings.allows(alert.kind) {
+            show_notification(app, &alert.title, &alert.body);
+        }
+        active.insert(alert.key);
+    }
+    active.extend(carried);
+    tracker.active = active;
+    tracker.pending = pending;
+}
+
+fn settings_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("settings.json"))
+}
+
+/// Refresh state in the background so the tray tooltip, the popover and
+/// notifications stay current while the popover is closed.
+fn start_background_checks(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        // Let the desktop settle after sign-in before the first round.
+        std::thread::sleep(Duration::from_secs(20));
+        loop {
+            let state = collect_state();
+            update_tray(&app, &state);
+            let _ = app.emit("state-updated", &state);
+            notify_changes(&app, &state);
+            std::thread::sleep(BACKGROUND_CHECK);
+        }
+    });
 }
 
 fn update_tray(app: &AppHandle, state: &Value) {
@@ -278,7 +340,29 @@ async fn get_state(app: AppHandle) -> Result<Value, String> {
         .await
         .map_err(|e| e.to_string())?;
     update_tray(&app, &state);
+    notify_changes(&app, &state);
     Ok(state)
+}
+
+#[tauri::command]
+fn get_settings(state: State<'_, AppState>) -> settings::Settings {
+    state.settings.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
+#[tauri::command]
+fn set_settings(app: AppHandle, state: State<'_, AppState>, patch: Value) -> Result<settings::Settings, String> {
+    let mut current = state.settings.lock().map_err(|e| e.to_string())?;
+    let next = current.merged(&patch);
+    if let Some(path) = settings_path(&app) {
+        settings::save(&path, &next)?;
+    }
+    *current = next.clone();
+    Ok(next)
+}
+
+#[tauri::command]
+fn test_notification(app: AppHandle) {
+    send_test_notification(&app);
 }
 
 #[tauri::command]
@@ -513,7 +597,16 @@ fn main() {
     tauri::Builder::default()
         // First, so a second launch (Start menu, autostart racing a manual
         // start) just opens the running app's popover and exits.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_popover(app)))
+        // `claude-swap-desktop.exe --test-notification` asks the running app
+        // to show a test notification (handy to check Windows lets it through).
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|a| a == "--test-notification") {
+                send_test_notification(app);
+            } else {
+                show_popover(app);
+            }
+        }))
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -534,11 +627,19 @@ fn main() {
             hide_window,
             quit_app,
             get_autostart,
-            set_autostart
+            set_autostart,
+            get_settings,
+            set_settings,
+            test_notification
         ])
         .setup(|app| {
-            build_tray(app.handle())?;
-            enable_autostart_on_first_run(app.handle());
+            let handle = app.handle();
+            if let (Some(path), Ok(mut s)) = (settings_path(handle), app.state::<AppState>().settings.lock()) {
+                *s = settings::load(&path);
+            }
+            build_tray(handle)?;
+            enable_autostart_on_first_run(handle);
+            start_background_checks(handle);
             Ok(())
         })
         .on_window_event(|window, event| match event {

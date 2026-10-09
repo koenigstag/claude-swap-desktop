@@ -68,7 +68,32 @@ function primaryLine(tok) {
   return tok.lines.find((l) => l.source === want) || null;
 }
 
-const lineHealthy = (l) => !!l && l.state === 'fresh' && l.refresh;
+/**
+ * Credential health, matching the notifications: 'bad' when any copy lost its
+ * refresh token (Claude Code wipes a copy only after a rejected refresh) or
+ * the copy claude-swap relies on is missing; 'idle' when that copy's access
+ * token expired but its refresh token renews it on next use; else 'ok'.
+ */
+function tokenState(tok) {
+  if (tok.lines.some((l) => !l.refresh)) return 'bad';
+  const l = primaryLine(tok);
+  if (!l) return tok.active || tok.noCredentials ? 'bad' : 'idle';
+  return l.state === 'fresh' ? 'ok' : 'idle';
+}
+
+function tokenBadge(tok) {
+  if (!tok) return null;
+  switch (tokenState(tok)) {
+    case 'ok':
+      return h('span', { class: 'badge ok' }, 'token ok');
+    case 'idle':
+      return h('span', { class: 'badge', title: 'The access token expired; its refresh token renews it on next use' }, 'token idle');
+    default:
+      return h('span', { class: 'badge bad', title: 'The refresh token is gone: sign in again with Re-login' }, 'needs login');
+  }
+}
+
+const lineDot = (l) => (!l.refresh ? 'bad' : l.state === 'fresh' ? 'ok' : 'warn');
 
 function ago(ms) {
   const s = Math.round((Date.now() - ms) / 1000);
@@ -239,7 +264,6 @@ function renderMappings() {
     ...mappings.map((m) => {
       const acct = accounts.find((a) => sameEmail(a.email, m.email));
       const tok = acct && tokens.find((t) => t.number === acct.number);
-      const healthy = lineHealthy(primaryLine(tok));
       return h(
         'div',
         { class: 'card mapping' },
@@ -258,7 +282,7 @@ function renderMappings() {
             !m.exists && h('span', { class: 'badge bad' }, 'folder missing'),
             !acct && h('span', { class: 'badge bad' }, 'not managed'),
             acct?.active && h('span', { class: 'badge warn', title: 'Shares the default login’s refresh token' }, 'default login'),
-            tok && h('span', { class: `badge ${healthy ? 'ok' : 'bad'}` }, healthy ? 'token ok' : 'needs login'),
+            tokenBadge(tok),
           ),
         ),
         h(
@@ -478,8 +502,6 @@ function renderAccounts() {
   root.replaceChildren(
     ...accounts.map((a) => {
       const tok = tokens.find((t) => t.number === a.number);
-      const primary = primaryLine(tok);
-      const healthy = lineHealthy(primary);
       const usage = a.usage || a.lastGoodUsage;
       const stale = !a.usage && a.lastGoodUsage;
       const spent = limitSpent(usage);
@@ -512,7 +534,7 @@ function renderAccounts() {
             { class: 'badges' },
             a.active && h('span', { class: 'badge accent' }, 'default'),
             limitBadge,
-            tok && h('span', { class: `badge ${healthy ? 'ok' : 'bad'}` }, healthy ? 'token ok' : 'needs login'),
+            tokenBadge(tok),
           ),
         ),
         usage &&
@@ -533,7 +555,7 @@ function renderAccounts() {
               h(
                 'li',
                 {},
-                h('span', { class: `dot ${lineHealthy(l) ? 'ok' : l.state === 'fresh' ? 'warn' : 'bad'}` }),
+                h('span', { class: `dot ${lineDot(l)}` }),
                 h('span', {}, `${l.source}: ${l.state}, refresh ${l.refresh ? 'yes' : 'no'}, expires ${l.expires}`),
               ),
             ),
@@ -708,7 +730,51 @@ async function toggleAutostart(e) {
     e.target.checked = await invoke('set_autostart', { enabled: wanted });
   } catch (err) {
     e.target.checked = !wanted;
-    $('updated').textContent = `Start with Windows: ${err}`;
+    showSettingsStatus(`Start with Windows: ${err}`);
+  }
+}
+
+/* ------------------------------- settings ------------------------------ */
+
+function showSettingsStatus(text) {
+  $('settings-status').textContent = text;
+  $('settings-status').hidden = !text;
+}
+
+function applySettings(s) {
+  for (const box of document.querySelectorAll('[data-setting]')) box.checked = !!s[box.dataset.setting];
+  for (const box of document.querySelectorAll('#notify-types [data-setting]')) box.disabled = !s.notifications;
+}
+
+async function openSettings() {
+  showSettingsStatus('');
+  await loadAutostart();
+  try {
+    applySettings(await invoke('get_settings'));
+  } catch (err) {
+    showSettingsStatus(`Couldn't load settings: ${err}`);
+  }
+  $('sheet-settings').hidden = false;
+}
+
+async function changeSetting(e) {
+  const key = e.target.dataset.setting;
+  try {
+    applySettings(await invoke('set_settings', { patch: { [key]: e.target.checked } }));
+  } catch (err) {
+    e.target.checked = !e.target.checked;
+    showSettingsStatus(`Couldn't save: ${err}`);
+  }
+}
+
+async function sendTestNotification() {
+  try {
+    await invoke('test_notification');
+    showSettingsStatus(
+      'Test notification sent. If none appeared, check Windows Settings → System → Notifications (and Do not disturb).',
+    );
+  } catch (err) {
+    showSettingsStatus(`Couldn't send it: ${err}`);
   }
 }
 
@@ -723,6 +789,10 @@ $('btn-refresh').addEventListener('click', refresh);
 $('btn-close').addEventListener('click', () => invoke('hide_window'));
 $('btn-quit').addEventListener('click', () => invoke('quit_app'));
 $('autostart').addEventListener('change', toggleAutostart);
+$('btn-settings').addEventListener('click', openSettings);
+$('settings-done').addEventListener('click', () => ($('sheet-settings').hidden = true));
+$('btn-test-notification').addEventListener('click', sendTestNotification);
+for (const box of document.querySelectorAll('[data-setting]')) box.addEventListener('change', changeSetting);
 $('btn-tui').addEventListener('click', () => invoke('open_tui').catch((e) => alert(e)));
 $('btn-lock').addEventListener('click', () => {
   locked = !locked;
@@ -754,12 +824,19 @@ $('relogin-done').addEventListener('click', () => ($('sheet-relogin').hidden = t
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!$('sheet-switch').hidden) $('sheet-switch').hidden = true;
+  else if (!$('sheet-settings').hidden) $('sheet-settings').hidden = true;
   else if (!$('sheet-map').hidden && !busy) $('sheet-map').hidden = true;
   else if (!$('sheet-unmap').hidden && !busy) $('sheet-unmap').hidden = true;
   else if (!$('sheet-relogin').hidden && !busy) $('sheet-relogin').hidden = true;
 });
 
 listen('relogin-progress', (e) => onProgress(e.payload));
+// The background check (every 5 min) pushes fresh state while we're hidden.
+listen('state-updated', (e) => {
+  if (busy) return;
+  state = e.payload;
+  render();
+});
 listen('popover-shown', () => {
   loadAutostart(); // may have changed outside the app (Task Manager → Startup apps)
   if (!busy && (!state || Date.now() - (state.fetchedAt || 0) > 30_000)) refresh();

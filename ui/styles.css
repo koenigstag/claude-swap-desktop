@@ -144,6 +144,7 @@ code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
 .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .card-head .who { min-width: 0; }
 .card-head .email { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.card-head .who .muted { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badges { display: flex; gap: 4px; flex-shrink: 0; }
 .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
 .badge.accent { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
@@ -159,6 +160,12 @@ code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
 .meter .fill.high { background: var(--bad); }
 .meter .pct { text-align: right; font-variant-numeric: tabular-nums; }
 .meter-note { font-size: 11px; color: var(--muted); margin-top: -2px; }
+.meter.money { grid-template-columns: 44px 1fr auto; }
+.meter.money .pct { white-space: nowrap; }
+.meter.money.on {
+  margin: 0 -6px; padding: 3px 6px; border-radius: 6px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
 
 .tokens { list-style: none; margin: 6px 0 8px; padding: 0; font-size: 12px; }
 .tokens li { display: flex; gap: 6px; align-items: baseline; }

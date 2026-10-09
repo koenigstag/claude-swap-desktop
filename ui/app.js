@@ -424,6 +424,49 @@ function meter(label, window) {
   );
 }
 
+function money(amount, currency = 'USD') {
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${currency}`;
+  }
+}
+
+/** A plan window (5h, 7d or a per-model one) is used up. */
+function limitSpent(usage) {
+  if (!usage) return false;
+  return [usage.fiveHour, usage.sevenDay, ...(usage.scoped || [])].some(
+    (w) => typeof w?.pct === 'number' && w.pct >= 100,
+  );
+}
+
+/**
+ * Extra-usage credits (claude-swap's `usage.spend`: used/limit in `currency`),
+ * which pay for requests once a plan limit is used up.
+ */
+function creditsMeter(spend, highlight) {
+  const hasLimit = typeof spend.limit === 'number' && spend.limit > 0;
+  const rawPct = typeof spend.pct === 'number' ? spend.pct : hasLimit ? (spend.used / spend.limit) * 100 : 0;
+  const pct = Math.max(0, Math.min(100, rawPct));
+  const level = pct >= 85 ? 'high' : pct >= 60 ? 'mid' : '';
+  const amount = hasLimit
+    ? `${money(spend.used, spend.currency)} / ${money(spend.limit, spend.currency)}`
+    : `${money(spend.used, spend.currency)} spent`;
+  const title = [
+    'Extra usage credits, used once a plan limit is reached',
+    spend.clock && `resets ${spend.clock} (in ${spend.countdown})`,
+  ]
+    .filter(Boolean)
+    .join(', ');
+  return h(
+    'div',
+    { class: `meter money ${highlight ? 'on' : ''}`, title },
+    h('span', { class: 'muted' }, 'Credits'),
+    h('div', { class: 'bar' }, h('div', { class: `fill ${level}`, style: `width:${pct}%` })),
+    h('span', { class: 'pct' }, amount),
+  );
+}
+
 function renderAccounts() {
   const root = $('accounts');
   const accounts = state.list?.accounts;
@@ -439,6 +482,18 @@ function renderAccounts() {
       const healthy = lineHealthy(primary);
       const usage = a.usage || a.lastGoodUsage;
       const stale = !a.usage && a.lastGoodUsage;
+      const spent = limitSpent(usage);
+      const spend = typeof usage?.spend?.used === 'number' ? usage.spend : null;
+      // Credits matter once a limit is used up, or if some were spent already.
+      const showCredits = spend && (spent || spend.used > 0);
+      const creditsGone = spend && typeof spend.pct === 'number' && spend.pct >= 100;
+      const limitBadge = !spent
+        ? null
+        : !spend
+          ? h('span', { class: 'badge bad', title: 'A plan limit is used up and no extra usage credits are set up' }, 'limit reached')
+          : creditsGone
+            ? h('span', { class: 'badge bad', title: 'A plan limit and the extra usage credits are both used up' }, 'out of credits')
+            : h('span', { class: 'badge warn', title: 'A plan limit is used up; requests are paid from extra usage credits' }, 'on credits');
 
       return h(
         'div',
@@ -456,6 +511,7 @@ function renderAccounts() {
             'div',
             { class: 'badges' },
             a.active && h('span', { class: 'badge accent' }, 'default'),
+            limitBadge,
             tok && h('span', { class: `badge ${healthy ? 'ok' : 'bad'}` }, healthy ? 'token ok' : 'needs login'),
           ),
         ),
@@ -466,6 +522,7 @@ function renderAccounts() {
             meter('5h', usage.fiveHour),
             meter('7d', usage.sevenDay),
             ...(usage.scoped || []).map((s) => meter(s.name, s)),
+            showCredits && creditsMeter(spend, spent),
           ),
         stale && h('div', { class: 'meter-note' }, `Last known usage (${a.usageStatus})`),
         tok &&

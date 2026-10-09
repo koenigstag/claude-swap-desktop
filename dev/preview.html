@@ -31,6 +31,15 @@
           { path: 'd:\\projects\\work\\client-app', displayPath: 'D:\\Projects\\Work\\client-app', exists: true, email: a1.email },
         ];
 
+        // ?scenario=spent: account 1 hit a per-model limit and pays from credits;
+        // account 2 hit its 5h limit with no credits set up.
+        if (new URLSearchParams(location.search).get('scenario') === 'spent') {
+          const [w, p] = state.list.accounts;
+          w.usage.scoped[0].pct = 100;
+          w.usage.spend = { used: 23.4, limit: 50, pct: 46.8, currency: 'USD', clock: 'Nov 1', countdown: '22d 9h' };
+          p.usage.fiveHour.pct = 100;
+        }
+
         if (new URLSearchParams(location.search).get('scenario') === 'broken') {
           const t = state.tokens.find((t) => t.number === 1);
           t.lines = [

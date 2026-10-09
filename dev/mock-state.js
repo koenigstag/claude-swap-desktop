@@ -19,6 +19,7 @@ window.MOCK_STATE = {
             "pct": 27.0, "resetsAt": "2026-10-04T16:00:00+03:00", "countdown": "4d 0h", "clock": "Oct 4 16:00",
             "expectedPct": 42.5, "aheadOfPace": false, "projectedExhaustionAt": "2026-10-08T13:13:27Z", "willLastToReset": true
           },
+          "spend": { "used": 19.85, "limit": 50.0, "pct": 39.7, "currency": "USD" },
           "scoped": [
             {
               "pct": 0.0, "resetsAt": "2026-10-04T16:00:00+03:00", "countdown": "4d 0h", "clock": "Oct 4 16:00",

@@ -130,13 +130,15 @@ fn tray_tooltip(state: &Value) -> String {
         Some(a) => {
             let usage = if a["usage"].is_object() { &a["usage"] } else { &a["lastGoodUsage"] };
             let pct = |k: &str| usage[k]["pct"].as_f64().map(|p| format!("{p:.0}%")).unwrap_or("–".into());
-            format!(
+            let mut line = format!(
                 "Claude Swap — #{} {}\n5h {} · 7d {}",
                 a["number"],
                 a["email"].as_str().unwrap_or(""),
                 pct("fiveHour"),
                 pct("sevenDay")
-            )
+            );
+            line.push_str(&credits_line(usage));
+            line
         }
         None => "Claude Swap — no active account".into(),
     };
@@ -159,6 +161,42 @@ fn tray_tooltip(state: &Value) -> String {
         s.push_str(&format!("\n⚠ {unhealthy} account(s) need re-login"));
     }
     s
+}
+
+/// A plan window (5h, 7d or a per-model one) is used up.
+fn limit_spent(usage: &Value) -> bool {
+    let full = |w: &Value| w["pct"].as_f64().is_some_and(|p| p >= 100.0);
+    full(&usage["fiveHour"])
+        || full(&usage["sevenDay"])
+        || usage["scoped"].as_array().is_some_and(|s| s.iter().any(full))
+}
+
+fn money(amount: f64, currency: &str) -> String {
+    match currency {
+        "USD" | "" => format!("${amount:.2}"),
+        "EUR" => format!("€{amount:.2}"),
+        "GBP" => format!("£{amount:.2}"),
+        other => format!("{amount:.2} {other}"),
+    }
+}
+
+/// "\nCredits $19.85 / $50.00" once a limit is used up or credits were spent
+/// (claude-swap's `usage.spend`); empty otherwise.
+fn credits_line(usage: &Value) -> String {
+    let spend = &usage["spend"];
+    let Some(used) = spend["used"].as_f64() else {
+        return String::new();
+    };
+    let spent = limit_spent(usage);
+    if !spent && used <= 0.0 {
+        return String::new();
+    }
+    let cur = spend["currency"].as_str().unwrap_or("USD");
+    let amount = match spend["limit"].as_f64().filter(|l| *l > 0.0) {
+        Some(limit) => format!("{} / {}", money(used, cur), money(limit, cur)),
+        None => format!("{} spent", money(used, cur)),
+    };
+    format!("\nCredits {amount}{}", if spent { " (limit reached, on credits)" } else { "" })
 }
 
 fn update_tray(app: &AppHandle, state: &Value) {
@@ -428,6 +466,31 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, String> {
     if enabled { launcher.enable() } else { launcher.disable() }.map_err(|e| e.to_string())?;
     mark_autostart_initialized(&app);
     launcher.is_enabled().map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod credit_tests {
+    use super::credits_line;
+    use serde_json::json;
+
+    #[test]
+    fn credits_shown_only_when_relevant() {
+        // No spend data (extra usage not set up): nothing.
+        assert_eq!(credits_line(&json!({ "fiveHour": { "pct": 100.0 } })), "");
+        // Spend set up, nothing spent, limits fine: hidden.
+        let idle = json!({ "fiveHour": { "pct": 40.0 }, "spend": { "used": 0.0, "limit": 50.0, "currency": "USD" } });
+        assert_eq!(credits_line(&idle), "");
+        // Already spent this period: shown.
+        let used = json!({ "fiveHour": { "pct": 4.0 }, "spend": { "used": 19.85, "limit": 50.0, "currency": "USD" } });
+        assert_eq!(credits_line(&used), "\nCredits $19.85 / $50.00");
+        // A per-model limit used up: shown and flagged, even at $0.
+        let spent = json!({
+            "fiveHour": { "pct": 10.0 },
+            "scoped": [{ "name": "Fable", "pct": 100.0 }],
+            "spend": { "used": 0.0, "limit": 50.0, "currency": "USD" }
+        });
+        assert_eq!(credits_line(&spent), "\nCredits $0.00 / $50.00 (limit reached, on credits)");
+    }
 }
 
 #[cfg(all(test, windows))]

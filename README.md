@@ -95,6 +95,15 @@ Each condition is announced once while it lasts, and again only if it clears and
 whole or per type under ⚙ Settings, which also has "Send a test notification". The running app also shows a test
 notification when started again with `--test-notification`.
 
+### Releases
+
+Releases are built by [GitHub Actions](.github/workflows/release.yml) with
+[`tauri-action`](https://github.com/tauri-apps/tauri-action). Bump `version` in `src-tauri/tauri.conf.json`,
+`src-tauri/Cargo.toml` and `package.json`, then push a matching tag (`v1.2.3`). The workflow runs the unit tests,
+builds the NSIS installer and creates a draft release with `claude-swap-desktop_<version>_x64-setup.exe` and
+`SHA256SUMS.txt`, ready to review and publish. A manual run ("Run workflow") builds and tests without releasing and
+keeps the installer as a workflow artifact.
+
 ## Install and start with Windows
 
 Run `src-tauri\target\release\bundle\nsis\Claude Swap Desktop_<version>_x64-setup.exe`. It installs per-user (no admin)

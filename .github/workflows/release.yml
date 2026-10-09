@@ -1,0 +1,74 @@
+name: Build and release
+
+# Manual runs build, test and keep the installer as a workflow artifact.
+# Pushing a tag like v1.2.3 (matching the app version) also creates a draft
+# GitHub release with the installer and SHA256SUMS.txt, published by hand.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the tag matches the app version
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $v = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "Tag $env:GITHUB_REF_NAME doesn't match the app version $v" }
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build the installer (and the draft release on tags)
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: Claude Swap Desktop __VERSION__
+          releaseBody: Draft created by the build workflow.
+          releaseDraft: true
+          releaseAssetNamePattern: claude-swap-desktop_[version]_[arch][setup][ext]
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: claude-swap-desktop_[version]_[arch]_[bundle]
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $v = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          "{0}  claude-swap-desktop_{1}_x64-setup.exe" -f (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower(), $v |
+            Set-Content -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SHA256SUMS
+          path: SHA256SUMS.txt
+
+      - name: Add checksums to the draft release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload ${{ github.ref_name }} SHA256SUMS.txt --clobber

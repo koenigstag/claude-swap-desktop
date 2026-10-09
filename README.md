@@ -36,6 +36,9 @@ The UI and flow were inspired by [Claude-Swap-Desktop](https://github.com/adithy
     otherwise the default login.
   - The result is checked against `mappings.json` afterwards, because `unmap` succeeds silently even when nothing was
     mapped.
+  - In VS Code, [claude-swap-wrapper](https://github.com/koenigstag/claude-swap-wrapper) makes the Claude Code
+    extension follow these mappings: each workspace runs on the account mapped to its folder, and unmapped folders
+    use the default login.
 - **Re-login** (per account):
   1. save the current default login (`claude-swap add`), but only if its live token is healthy
   2. open a terminal with `claude auth login --email <account>` and wait for it to close (cancellable, 15 min limit)

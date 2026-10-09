@@ -174,8 +174,6 @@ fn credits_line(usage: &Value) -> String {
 
 /* ---------------------------- notifications ----------------------------- */
 
-const BACKGROUND_CHECK: Duration = Duration::from_secs(5 * 60);
-
 /// Which alert conditions are currently showing, so each is announced once
 /// while it lasts. Re-login alerts wait for a second sighting (`pending`) so
 /// a momentary glitch in token status doesn't cry wolf.
@@ -187,7 +185,13 @@ struct AlertTracker {
 
 fn show_notification(app: &AppHandle, title: &str, body: &str) {
     use tauri_plugin_notification::NotificationExt;
-    let _ = app.notification().builder().title(title).body(body).show();
+    // Windows toasts go through WinRT, which needs a COM-initialized thread.
+    // The background checker's thread isn't one (sending from it failed
+    // silently), so always show them from the main thread.
+    let (handle, title, body) = (app.clone(), title.to_string(), body.to_string());
+    let _ = app.run_on_main_thread(move || {
+        let _ = handle.notification().builder().title(&title).body(&body).show();
+    });
 }
 
 fn send_test_notification(app: &AppHandle) {
@@ -222,6 +226,7 @@ fn notify_changes(app: &AppHandle, state: &Value) {
 
     let mut active = HashSet::new();
     let mut pending = HashSet::new();
+    let mut fresh = Vec::new();
     for alert in alerts::current(state) {
         let confirmed = alert.kind != alerts::Kind::Relogin
             || tracker.pending.contains(&alert.key)
@@ -230,14 +235,20 @@ fn notify_changes(app: &AppHandle, state: &Value) {
             pending.insert(alert.key);
             continue;
         }
+        active.insert(alert.key.clone());
         if !tracker.active.contains(&alert.key) && settings.allows(alert.kind) {
-            show_notification(app, &alert.title, &alert.body);
+            fresh.push(alert);
         }
-        active.insert(alert.key);
     }
     active.extend(carried);
     tracker.active = active;
     tracker.pending = pending;
+    drop(tracker);
+
+    // Conditions that start together for one account become one notification.
+    for alert in alerts::merge_simultaneous(fresh) {
+        show_notification(app, &alert.title, &alert.body);
+    }
 }
 
 fn settings_path(app: &AppHandle) -> Option<std::path::PathBuf> {
@@ -256,7 +267,22 @@ fn start_background_checks(app: &AppHandle) {
             update_tray(&app, &state);
             let _ = app.emit("state-updated", &state);
             notify_changes(&app, &state);
-            std::thread::sleep(BACKGROUND_CHECK);
+            // Wait "Refresh every" minutes, re-reading the setting so a change
+            // applies to the current wait too.
+            let mut waited = Duration::ZERO;
+            loop {
+                let interval = app
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .map(|s| Duration::from_secs(u64::from(s.refresh_minutes) * 60))
+                    .unwrap_or(Duration::from_secs(300));
+                if waited >= interval {
+                    break;
+                }
+                std::thread::sleep(Duration::from_secs(15));
+                waited += Duration::from_secs(15);
+            }
         }
     });
 }
@@ -351,18 +377,79 @@ fn get_settings(state: State<'_, AppState>) -> settings::Settings {
 
 #[tauri::command]
 fn set_settings(app: AppHandle, state: State<'_, AppState>, patch: Value) -> Result<settings::Settings, String> {
-    let mut current = state.settings.lock().map_err(|e| e.to_string())?;
-    let next = current.merged(&patch);
-    if let Some(path) = settings_path(&app) {
-        settings::save(&path, &next)?;
+    let (next, on_top_changed) = {
+        let mut current = state.settings.lock().map_err(|e| e.to_string())?;
+        let next = current.merged(&patch);
+        if let Some(path) = settings_path(&app) {
+            settings::save(&path, &next)?;
+        }
+        let changed = next.always_on_top != current.always_on_top;
+        *current = next.clone();
+        (next, changed)
+    };
+    // Outside the lock: window calls can raise window events, whose handler
+    // reads the settings too.
+    if on_top_changed {
+        apply_always_on_top(&app, next.always_on_top);
     }
-    *current = next.clone();
     Ok(next)
+}
+
+fn apply_always_on_top(app: &AppHandle, on_top: bool) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.set_always_on_top(on_top);
+    }
 }
 
 #[tauri::command]
 fn test_notification(app: AppHandle) {
     send_test_notification(&app);
+}
+
+/// Versions and paths for the About section.
+#[tauri::command]
+async fn get_about(app: AppHandle) -> Value {
+    let app_version = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let tool = |exe: Result<std::path::PathBuf, String>| match exe {
+            Ok(path) => {
+                let version = cli::run(&path, &["--version"], Duration::from_secs(15))
+                    .ok()
+                    .map(|o| o.stdout.trim().to_string())
+                    .filter(|v| !v.is_empty());
+                // PATH entries can hold `..` segments; show the resolved path.
+                let shown = on_disk_path(&path.to_string_lossy()).unwrap_or_else(|| path.display().to_string());
+                json!({ "path": shown, "version": version })
+            }
+            Err(e) => json!({ "error": e }),
+        };
+        json!({
+            "appVersion": app_version,
+            "portable": location() == Location::Portable,
+            "claudeSwap": tool(cli::cswap_exe()),
+            "claude": tool(cli::claude_exe()),
+        })
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Open one of the project's fixed links in the default browser. Only these
+/// URLs, so the page can't be used to open arbitrary ones.
+#[tauri::command]
+fn open_link(kind: String) -> Result<(), String> {
+    const REPO: &str = "https://github.com/koenigstag/claude-swap-desktop";
+    let url = match kind.as_str() {
+        "repo" => REPO.to_string(),
+        "releases" => format!("{REPO}/releases"),
+        "license" => format!("{REPO}/blob/main/LICENSE"),
+        other => return Err(format!("unknown link: {other}")),
+    };
+    std::process::Command::new("explorer.exe")
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -496,15 +583,56 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
-/* ----------------------------- autostart -------------------------------- */
+/* ------------------------- install location ----------------------------- */
 
-/// Running from an installed location, not a build folder (`…\target\…`).
-/// Only then is the exe path stable enough to register for startup.
-fn is_installed() -> bool {
-    std::env::current_exe()
-        .map(|p| !p.components().any(|c| c.as_os_str().eq_ignore_ascii_case("target")))
-        .unwrap_or(false)
+/// Where the exe runs from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Location {
+    /// The installer's folder (it puts `uninstall.exe` next to the app).
+    Installed,
+    /// Anywhere else: the portable exe.
+    Portable,
+    /// A build folder (`…\target\…`).
+    Build,
 }
+
+fn location() -> Location {
+    let Ok(exe) = std::env::current_exe() else {
+        return Location::Build;
+    };
+    if exe.components().any(|c| c.as_os_str().eq_ignore_ascii_case("target")) {
+        Location::Build
+    } else if exe.with_file_name("uninstall.exe").exists() {
+        Location::Installed
+    } else {
+        Location::Portable
+    }
+}
+
+/// Windows takes a notification's app name and icon, and the app's entry in
+/// Settings → Notifications, from the Start menu shortcut carrying the app's
+/// ID. The installer creates one; the portable exe registers the ID under
+/// HKCU instead, the documented route for apps without a shortcut.
+#[cfg(windows)]
+fn register_notification_identity(app: &AppHandle) {
+    use winreg::{enums::HKEY_CURRENT_USER, RegKey};
+    let Ok(dir) = app.path().app_local_data_dir() else {
+        return;
+    };
+    let icon = dir.join("notification-icon.png");
+    let png: &[u8] = include_bytes!("../icons/128x128.png");
+    if std::fs::read(&icon).ok().as_deref() != Some(png) {
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(&icon, png);
+    }
+    let path = format!(r"Software\Classes\AppUserModelId\{}", app.config().identifier);
+    if let Ok((key, _)) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(path) {
+        let _ = key.set_value("DisplayName", &app.package_info().name);
+        let _ = key.set_value("IconUri", &icon.to_string_lossy().into_owned());
+    }
+}
+
+/* ----------------------------- autostart -------------------------------- */
 
 /// Marker that the first-run default (start with Windows: on) was applied, so a
 /// later "off" from the user sticks.
@@ -521,9 +649,11 @@ fn mark_autostart_initialized(app: &AppHandle) {
     }
 }
 
+/// Only the installed app starts with Windows by default. The portable exe
+/// can be moved or deleted, so it registers only when the user turns it on.
 fn enable_autostart_on_first_run(app: &AppHandle) {
     use tauri_plugin_autostart::ManagerExt;
-    if !is_installed() || autostart_marker(app).is_some_and(|m| m.exists()) {
+    if location() != Location::Installed || autostart_marker(app).is_some_and(|m| m.exists()) {
         return;
     }
     if app.autolaunch().enable().is_ok() {
@@ -535,7 +665,11 @@ fn enable_autostart_on_first_run(app: &AppHandle) {
 fn get_autostart(app: AppHandle) -> Value {
     use tauri_plugin_autostart::ManagerExt;
     json!({
-        "installed": is_installed(),
+        "location": match location() {
+            Location::Installed => "installed",
+            Location::Portable => "portable",
+            Location::Build => "build",
+        },
         "enabled": app.autolaunch().is_enabled().unwrap_or(false),
     })
 }
@@ -543,8 +677,8 @@ fn get_autostart(app: AppHandle) -> Value {
 #[tauri::command]
 fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, String> {
     use tauri_plugin_autostart::ManagerExt;
-    if !is_installed() {
-        return Err("Install the app first: a build-folder exe can't start with Windows".into());
+    if location() == Location::Build {
+        return Err("A build-folder exe can't start with Windows: use the installer or the portable exe".into());
     }
     let launcher = app.autolaunch();
     if enabled { launcher.enable() } else { launcher.disable() }.map_err(|e| e.to_string())?;
@@ -630,22 +764,33 @@ fn main() {
             set_autostart,
             get_settings,
             set_settings,
-            test_notification
+            test_notification,
+            get_about,
+            open_link
         ])
         .setup(|app| {
             let handle = app.handle();
-            if let (Some(path), Ok(mut s)) = (settings_path(handle), app.state::<AppState>().settings.lock()) {
-                *s = settings::load(&path);
+            if let Some(path) = settings_path(handle) {
+                let loaded = settings::load(&path);
+                apply_always_on_top(handle, loaded.always_on_top);
+                if let Ok(mut s) = app.state::<AppState>().settings.lock() {
+                    *s = loaded;
+                }
             }
             build_tray(handle)?;
             enable_autostart_on_first_run(handle);
+            #[cfg(windows)]
+            if location() == Location::Portable {
+                register_notification_identity(handle);
+            }
             start_background_checks(handle);
             Ok(())
         })
         .on_window_event(|window, event| match event {
             WindowEvent::Focused(false) => {
                 let state = window.state::<AppState>();
-                if !state.pinned.load(Ordering::SeqCst) && !state.dialog_open.load(Ordering::SeqCst) {
+                let hide_on_blur = state.settings.lock().map(|s| s.hide_on_blur).unwrap_or(true);
+                if hide_on_blur && !state.pinned.load(Ordering::SeqCst) && !state.dialog_open.load(Ordering::SeqCst) {
                     state.hidden_at_ms.store(now_ms(), Ordering::SeqCst);
                     let _ = window.hide();
                 }

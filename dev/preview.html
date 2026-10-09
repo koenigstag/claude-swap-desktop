@@ -70,6 +70,12 @@
           return { ok: true, message: steps.at(-1)[2], tokenLines: [] };
         }
 
+        const mockSettings = {
+          notifications: true, notifyRelogin: true, notifyLimits: true, notifyCredits: true, notifyLogin: true,
+          alwaysOnTop: true, hideOnBlur: true, lockSwitching: true, confirmSwitch: true, warnRunning: true,
+          refreshMinutes: 5,
+        };
+
         window.__TAURI__ = {
           core: {
             invoke: async (cmd, args) => {
@@ -77,9 +83,18 @@
                 case 'get_state': await wait(200); return state;
                 case 'relogin': return fakeRelogin(args);
                 case 'switch_account': await wait(500); return {};
-                case 'get_autostart': return { installed: true, enabled: true };
-                case 'get_settings': return { ...(window.MOCK_SETTINGS ||= { notifications: true, notifyRelogin: true, notifyLimits: true, notifyCredits: true, notifyLogin: true }) };
-                case 'set_settings': Object.assign(window.MOCK_SETTINGS, args.patch); return { ...window.MOCK_SETTINGS };
+                case 'get_autostart': return { location: 'installed', enabled: true };
+                case 'get_settings': return { ...mockSettings };
+                case 'set_settings': Object.assign(mockSettings, args.patch); return { ...mockSettings };
+                case 'get_about':
+                  await wait(300);
+                  return {
+                    appVersion: '1.0.1',
+                    portable: false,
+                    claudeSwap: { path: 'C:\\Users\\me\\.local\\bin\\claude-swap.exe', version: 'claude-swap 0.26.0' },
+                    claude: { path: 'C:\\Users\\me\\.local\\bin\\claude.exe', version: '2.1.295 (Claude Code)' },
+                  };
+                case 'open_link': console.log('open_link', args.kind); return null;
                 case 'test_notification': return null;
                 case 'set_autostart': return args.enabled;
                 case 'pick_folder': await wait(300); return 'D:\\Projects\\side-project';
@@ -119,6 +134,13 @@
       document.body.append(...doc.body.childNodes);
       const s = document.createElement('script');
       s.src = '../ui/app.js';
+      // For screenshots: ?tab=mappings, ?view=settings, ?height=900 (taller than the popover).
+      s.onload = () => {
+        const params = new URLSearchParams(location.search);
+        if (params.get('height')) document.documentElement.style.height = document.body.style.height = `${params.get('height')}px`;
+        if (params.get('tab')) showTab(params.get('tab'));
+        if (params.get('view') === 'settings') showSettings(true);
+      };
       document.body.append(s);
     </script>
   </body>

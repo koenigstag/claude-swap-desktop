@@ -73,7 +73,6 @@ main { flex: 1; overflow-y: auto; padding: 10px 12px; }
 .note { margin: 4px 2px 0; line-height: 1.5; }
 .toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .toolbar button { padding: 4px 10px; font-size: 12px; }
-button.icon.mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; font-weight: 700; }
 button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
@@ -104,9 +103,25 @@ button {
 button:hover:not(:disabled) { border-color: var(--muted); }
 button:disabled { opacity: 0.45; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button.icon { background: transparent; border-color: transparent; padding: 3px 7px; font-size: 14px; }
+button.icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border-radius: 8px;
+  background: transparent; border-color: transparent; color: var(--text);
+}
 button.icon:hover { background: var(--panel-2); }
-button.icon.on { color: var(--accent); }
+button.icon.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+
+/* Line icons: inherit the button's colour. */
+.ico {
+  width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.pin-icon { transform: rotate(45deg); transition: transform 0.12s ease; }
+#btn-pin.on .pin-icon { transform: none; fill: currentColor; }
+#btn-lock .lock-open, #btn-lock:not(.on) .lock-closed { display: none; }
+#btn-lock:not(.on) .lock-open { display: inline; }
+/* 8 cog teeth: a thick dashed ring (circumference 2π·8 ≈ 50.27 = 8 × (3.14 + 3.14)). */
+.cog-teeth { stroke-width: 2.6; stroke-dasharray: 3.14 3.14; stroke-linecap: butt; }
 button.link { background: none; border: none; color: var(--muted); padding: 0; }
 button.link:hover { color: var(--text); }
 
@@ -189,9 +204,46 @@ code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
 .check { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0 10px; }
 .check input { margin-top: 2px; }
 .check:has(input:disabled) { opacity: 0.5; }
-.sheet h3.sub { margin: 14px 0 6px; font-size: 13px; }
-.indent { margin-left: 22px; }
-.indent .check { margin: 2px 0 6px; }
+/* Settings page: takes the place of the tabs, content and footer while open. */
+body[data-view='settings'] .tabs,
+body[data-view='settings'] main,
+body[data-view='settings'] footer { display: none; }
+.page { flex: 1; overflow-y: auto; padding: 2px 14px 14px; }
+.page[hidden] { display: none; }
+.page h3.section {
+  margin: 14px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.page .hint { margin: 4px 0 8px; line-height: 1.45; }
+.page .indent { margin-left: 40px; } /* under the label text, past the switch */
+.switch-row { display: flex; align-items: flex-start; gap: 10px; padding: 4px 0; cursor: pointer; }
+.switch-row:has(input:disabled) { opacity: 0.5; cursor: default; }
+input.switch {
+  appearance: none; flex-shrink: 0; position: relative; margin: 0; cursor: inherit;
+  width: 30px; height: 18px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--line);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+input.switch::before {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 12px; height: 12px; border-radius: 50%; background: var(--muted);
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+input.switch:checked { background: var(--accent); border-color: var(--accent); }
+input.switch:checked::before { transform: translateX(12px); background: #fff; }
+input.switch:focus:not(:focus-visible) { outline: none; }
+.select-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0 2px; }
+#btn-test-notification { padding: 4px 10px; font-size: 12px; }
+.about { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 12px; }
+.about .k { color: var(--muted); }
+.about .v { min-width: 0; user-select: text; }
+.about .path {
+  display: block; font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.links { margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
+.links a { color: var(--accent); text-decoration: none; }
+.links a:hover { text-decoration: underline; }
 
 #relogin-steps { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 8px; }
 #relogin-steps li { display: grid; grid-template-columns: 18px 1fr; gap: 6px; }

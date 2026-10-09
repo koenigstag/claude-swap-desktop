@@ -13,14 +13,122 @@
         <span id="default-login" class="muted"></span>
       </div>
       <div class="tools">
-        <button id="btn-lock" class="icon" title="Locked: switching is disabled"></button>
-        <button id="btn-pin" class="icon" title="Keep open when focus moves away">📌</button>
-        <button id="btn-tui" class="icon mono" title="Open the claude-swap dashboard (TUI)">&gt;_</button>
-        <button id="btn-refresh" class="icon" title="Refresh">⟳</button>
-        <button id="btn-settings" class="icon" title="Settings">⚙</button>
-        <button id="btn-close" class="icon" title="Hide">✕</button>
+        <button id="btn-refresh" class="icon" title="Refresh">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M19 12a7 7 0 1 1-2.05-4.95" />
+            <path d="M19 4.5V8h-3.5" />
+          </svg>
+        </button>
+        <button id="btn-lock" class="icon" title="Locked: switching is disabled" aria-pressed="true">
+          <svg class="ico lock-closed" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="10" rx="2" />
+            <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+          </svg>
+          <svg class="ico lock-open" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="10" rx="2" />
+            <path d="M8 11V8a4 4 0 0 1 7.6-1.75" />
+          </svg>
+        </button>
+        <button id="btn-pin" class="icon" title="Pin: keep open when focus moves away" aria-pressed="false">
+          <svg class="ico pin-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 3h6M10 3v6l-3 4h10l-3-4V3M12 13v8" />
+          </svg>
+        </button>
+        <button id="btn-settings" class="icon" title="Settings" aria-pressed="false">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="cog-teeth" cx="12" cy="12" r="8" />
+            <circle cx="12" cy="12" r="5.6" />
+            <circle cx="12" cy="12" r="2.2" />
+          </svg>
+        </button>
+        <button id="btn-close" class="icon" title="Hide">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+          </svg>
+        </button>
       </div>
     </header>
+
+    <!-- Settings page (replaces tabs, content and footer while open) -->
+    <section id="page-settings" class="page" hidden>
+      <h3 class="section">Behaviour</h3>
+      <label class="switch-row" id="autostart-label">
+        <input type="checkbox" class="switch" id="autostart" />
+        <span>Start with Windows</span>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" class="switch" data-setting="alwaysOnTop" />
+        <span>Always on top</span>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" class="switch" data-setting="hideOnBlur" />
+        <span>Hide when it loses focus</span>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" class="switch" data-setting="lockSwitching" />
+        <span>Lock switching</span>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" class="switch" data-setting="confirmSwitch" />
+        <span>Confirm before switching</span>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" class="switch" data-setting="warnRunning" />
+        <span>Warn if Claude Code is running</span>
+      </label>
+      <div class="select-row">
+        <label for="refresh-minutes">Refresh every</label>
+        <select id="refresh-minutes">
+          <option value="1">1 minute</option>
+          <option value="2">2 minutes</option>
+          <option value="5">5 minutes</option>
+          <option value="10">10 minutes</option>
+          <option value="15">15 minutes</option>
+          <option value="30">30 minutes</option>
+        </select>
+      </div>
+      <p class="muted hint">
+        How often the background check runs (tray tooltip, notifications). claude-swap caches usage for about
+        3 minutes and paces its own polling, so short intervals mostly re-read its cache.
+      </p>
+
+      <h3 class="section">Notifications</h3>
+      <label class="switch-row">
+        <input type="checkbox" class="switch" data-setting="notifications" />
+        <span>Show Windows notifications</span>
+      </label>
+      <div class="indent" id="notify-types">
+        <label class="switch-row">
+          <input type="checkbox" class="switch" data-setting="notifyRelogin" />
+          <span>An account needs re-login</span>
+        </label>
+        <label class="switch-row">
+          <input type="checkbox" class="switch" data-setting="notifyLimits" />
+          <span>A plan limit is used up, and whether credits take over</span>
+        </label>
+        <label class="switch-row">
+          <input type="checkbox" class="switch" data-setting="notifyCredits" />
+          <span>Credits pass 80% or run out</span>
+        </label>
+        <label class="switch-row">
+          <input type="checkbox" class="switch" data-setting="notifyLogin" />
+          <span>The default login changes, signs out, or shares its token</span>
+        </label>
+      </div>
+      <p class="muted hint">
+        Each problem is announced once, and again only if it comes back after clearing.
+      </p>
+      <button id="btn-test-notification">Send a test notification</button>
+      <p id="settings-status" class="muted hint" hidden></p>
+
+      <h3 class="section">About</h3>
+      <div id="about" class="about"></div>
+      <p class="links">
+        <a href="#" data-link="repo">GitHub</a> · <a href="#" data-link="releases">Releases</a> ·
+        <a href="#" data-link="license">MIT License</a>
+      </p>
+      <p class="muted hint">Unofficial tool, not affiliated with Anthropic or the claude-swap author.</p>
+    </section>
 
     <nav class="tabs" role="tablist">
       <button role="tab" data-tab="profiles">Profiles</button>
@@ -58,48 +166,6 @@
       <div class="actions">
         <button id="switch-cancel">Cancel</button>
         <button id="switch-go" class="primary">Switch</button>
-      </div>
-    </section>
-
-    <!-- Settings -->
-    <section id="sheet-settings" class="sheet" hidden>
-      <h2>Settings</h2>
-      <label class="check" id="autostart-label">
-        <input type="checkbox" id="autostart" />
-        <span>Start with Windows</span>
-      </label>
-
-      <h3 class="sub">Notifications</h3>
-      <label class="check">
-        <input type="checkbox" data-setting="notifications" />
-        <span>Show Windows notifications</span>
-      </label>
-      <div class="indent" id="notify-types">
-        <label class="check">
-          <input type="checkbox" data-setting="notifyRelogin" />
-          <span>An account needs re-login</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-setting="notifyLimits" />
-          <span>A plan limit is used up, and whether credits take over</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-setting="notifyCredits" />
-          <span>Credits pass 80% or run out</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-setting="notifyLogin" />
-          <span>The default login changes, signs out, or shares its token</span>
-        </label>
-      </div>
-      <p class="muted">
-        Checked every 5 minutes in the background and whenever this window refreshes. Each problem is announced
-        once, and again only if it comes back after clearing.
-      </p>
-      <p id="settings-status" class="muted" hidden></p>
-      <div class="actions">
-        <button id="btn-test-notification">Send a test notification</button>
-        <button id="settings-done" class="primary">Done</button>
       </div>
     </section>
 

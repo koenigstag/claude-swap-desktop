@@ -130,19 +130,28 @@ pub fn current(state: &Value) -> Vec<Alert> {
         let spent = spent_windows(usage);
         if !spent.is_empty() {
             let names = spent.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ");
-            let reset = spent
-                .iter()
-                .find_map(|(_, clock)| clock.as_deref())
-                .map(|c| format!(", resets {c}"))
-                .unwrap_or_default();
-            let (title, body) = match credits_amount(spend) {
-                Some(amount) => (
-                    format!("Account {n} is on credits"),
-                    format!("{names} limit reached{reset}. Credits: {amount}."),
+            let clock = spent.iter().find_map(|(_, clock)| clock.as_deref());
+            // Short, most important first: the collapsed toast shows one body line.
+            let window = match clock {
+                Some(c) => format!("{names} resets {c}"),
+                None => format!("{names} limit reached"),
+            };
+            let (title, body) = match (credits_amount(spend), credits_pct(spend)) {
+                (Some(amount), Some(pct)) if pct >= 100.0 => (
+                    format!("Account {n}: limit reached, credits used up"),
+                    format!("{amount} · {window}"),
                 ),
-                None => (
-                    format!("Account {n} hit its limit"),
-                    format!("{names} limit reached{reset}. No extra usage credits are set up."),
+                (Some(amount), Some(pct)) => (
+                    format!("Account {n} is on credits ({pct:.0}%)"),
+                    format!("{amount} · {window}"),
+                ),
+                (Some(amount), None) => (format!("Account {n} is on credits"), format!("{amount} · {window}")),
+                (None, _) => (
+                    format!("Account {n} hit its {names} limit{}", if spent.len() > 1 { "s" } else { "" }),
+                    match clock {
+                        Some(c) => format!("Resets {c}. No extra usage credits are set up."),
+                        None => "No extra usage credits are set up.".to_string(),
+                    },
                 ),
             };
             out.push(Alert { key: format!("limit:{n}"), kind: Kind::Limit, title, body });
@@ -217,6 +226,20 @@ pub fn current(state: &Value) -> Vec<Alert> {
     out
 }
 
+/// Of the alerts about to be shown together, drop an account's credits alert
+/// when the same account's limit alert is among them: the limit alert already
+/// carries the credits level ("on credits (91%)", "credits used up") and amount,
+/// so one notification says it all. Both still count as announced.
+pub fn merge_simultaneous(fresh: Vec<Alert>) -> Vec<Alert> {
+    let account = |a: &Alert| a.key.split_once(':').map(|(_, n)| n.to_string());
+    let limited: std::collections::HashSet<String> =
+        fresh.iter().filter(|a| a.kind == Kind::Limit).filter_map(account).collect();
+    fresh
+        .into_iter()
+        .filter(|a| a.kind != Kind::Credits || !account(a).is_some_and(|n| limited.contains(&n)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,9 +303,34 @@ mod tests {
         s["list"]["accounts"][0]["usage"]["fiveHour"] = json!({ "pct": 100.0, "clock": "19:10" });
         s["list"]["accounts"][1]["usage"]["sevenDay"] = json!({ "pct": 100.0 });
         let alerts = current(&s);
-        assert_eq!(alerts[0].title, "Account 1 is on credits");
-        assert_eq!(alerts[0].body, "5h limit reached, resets 19:10. Credits: $19.85 / $50.00.");
-        assert_eq!(alerts[1].title, "Account 2 hit its limit");
+        assert_eq!(alerts[0].title, "Account 1 is on credits (40%)");
+        assert_eq!(alerts[0].body, "$19.85 / $50.00 · 5h resets 19:10");
+        assert_eq!(alerts[1].title, "Account 2 hit its 7d limit");
+        assert_eq!(alerts[1].body, "No extra usage credits are set up.");
+    }
+
+    #[test]
+    fn limit_and_credits_at_once_make_one_notification() {
+        // The reported case: 7d used up while credits were already at 91%.
+        let mut s = base();
+        s["list"]["accounts"][0]["usage"]["sevenDay"] = json!({ "pct": 100.0, "clock": "Oct 11 16:00" });
+        s["list"]["accounts"][0]["usage"]["spend"] = json!({ "used": 45.43, "limit": 50.0, "pct": 90.86, "currency": "USD" });
+        let all = current(&s);
+        assert_eq!(all.iter().map(|a| a.key.as_str()).collect::<Vec<_>>(), vec!["limit:1", "credits80:1"]);
+        let shown = merge_simultaneous(all);
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].title, "Account 1 is on credits (91%)");
+        assert_eq!(shown[0].body, "$45.43 / $50.00 · 7d resets Oct 11 16:00");
+
+        // Credits used up together with the limit: still one, saying both.
+        s["list"]["accounts"][0]["usage"]["spend"]["pct"] = json!(100.0);
+        let shown = merge_simultaneous(current(&s));
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].title, "Account 1: limit reached, credits used up");
+
+        // A credits alert for another account, or on its own, is kept.
+        let lone = Alert { key: "credits80:2".into(), kind: Kind::Credits, title: String::new(), body: String::new() };
+        assert_eq!(merge_simultaneous(vec![lone.clone()]), vec![lone]);
     }
 
     #[test]

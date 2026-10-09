@@ -18,7 +18,8 @@ const MARKS = { pending: '○', running: '◌', done: '✓', skipped: '–', war
 const $ = (id) => document.getElementById(id);
 let state = null;
 let busy = false;
-let locked = loadPref('locked', true);
+let settings = null; // from get_settings, null until loaded
+let locked = true; // settings.lockSwitching, also toggled by the header's lock button
 let pinned = false;
 let pendingSwitch = null;
 let reloginTarget = null;
@@ -105,9 +106,14 @@ function ago(ms) {
 /* ------------------------------- render -------------------------------- */
 
 function render() {
-  $('btn-lock').textContent = locked ? '🔒' : '🔓';
+  $('btn-lock').classList.toggle('on', locked);
+  $('btn-lock').setAttribute('aria-pressed', String(locked));
   $('btn-lock').title = locked ? 'Locked: switching is disabled. Click to unlock.' : 'Unlocked: click to lock switching.';
   $('btn-pin').classList.toggle('on', pinned);
+  $('btn-pin').setAttribute('aria-pressed', String(pinned));
+  $('btn-pin').title = pinned
+    ? 'Pinned: stays open when focus moves away. Click to unpin.'
+    : 'Pin: keep open when focus moves away';
 
   if (!state) return;
   const login = state.defaultLogin;
@@ -569,9 +575,9 @@ function renderAccounts() {
             h(
               'button',
               {
-                onclick: () => openSwitch(a),
+                onclick: () => requestSwitch(a),
                 disabled: busy || locked,
-                title: locked ? 'Unlock (🔒) to switch' : '',
+                title: locked ? 'Switching is locked: unlock it with the lock button in the header' : '',
               },
               'Make default',
             ),
@@ -597,13 +603,23 @@ async function refresh() {
 
 function sessionsText() {
   const n = (state?.sessions || []).length;
-  if (!n) return '';
+  if (!n || settings?.warnRunning === false) return '';
   return n === 1
     ? '1 Claude session is running on the default login. It will briefly see the other account.'
     : `${n} Claude sessions are running on the default login. They will briefly see the other account.`;
 }
 
 /* ------------------------------- switch -------------------------------- */
+
+/** "Make default": asks first unless that's turned off in Settings. */
+function requestSwitch(account) {
+  if (settings?.confirmSwitch === false) {
+    pendingSwitch = account;
+    doSwitch();
+  } else {
+    openSwitch(account);
+  }
+}
 
 function openSwitch(account) {
   pendingSwitch = account;
@@ -713,12 +729,13 @@ async function startRelogin() {
 async function loadAutostart() {
   const box = $('autostart');
   try {
-    const { installed, enabled } = await invoke('get_autostart');
+    const { location, enabled } = await invoke('get_autostart');
     box.checked = !!enabled;
-    box.disabled = !installed;
-    $('autostart-label').title = installed
-      ? 'Start Claude Swap in the tray when you sign in to Windows'
-      : 'Available in the installed app, not when running from a build folder';
+    box.disabled = location === 'build';
+    $('autostart-label').title = {
+      installed: 'Start Claude Swap in the tray when you sign in to Windows',
+      portable: 'Starts this exe from its current folder. After moving it, turn this off and on again.',
+    }[location] || 'Available in the installed or portable app, not when running from a build folder';
   } catch {
     $('autostart-label').hidden = true;
   }
@@ -736,35 +753,84 @@ async function toggleAutostart(e) {
 
 /* ------------------------------- settings ------------------------------ */
 
+let settingsOpen = false;
+
 function showSettingsStatus(text) {
   $('settings-status').textContent = text;
   $('settings-status').hidden = !text;
 }
 
 function applySettings(s) {
+  settings = s;
+  locked = s.lockSwitching;
   for (const box of document.querySelectorAll('[data-setting]')) box.checked = !!s[box.dataset.setting];
   for (const box of document.querySelectorAll('#notify-types [data-setting]')) box.disabled = !s.notifications;
+  $('refresh-minutes').value = String(s.refreshMinutes);
+  render();
 }
 
-async function openSettings() {
-  showSettingsStatus('');
-  await loadAutostart();
+async function loadSettings() {
   try {
     applySettings(await invoke('get_settings'));
   } catch (err) {
     showSettingsStatus(`Couldn't load settings: ${err}`);
   }
-  $('sheet-settings').hidden = false;
 }
 
-async function changeSetting(e) {
-  const key = e.target.dataset.setting;
+async function saveSettings(patch) {
   try {
-    applySettings(await invoke('set_settings', { patch: { [key]: e.target.checked } }));
+    applySettings(await invoke('set_settings', { patch }));
   } catch (err) {
-    e.target.checked = !e.target.checked;
+    if (settings) applySettings(settings); // put the controls back
     showSettingsStatus(`Couldn't save: ${err}`);
   }
+}
+
+/** The settings page replaces the tabs, content and footer until closed. */
+function showSettings(open) {
+  settingsOpen = open;
+  if (open) document.body.dataset.view = 'settings';
+  else delete document.body.dataset.view;
+  $('page-settings').hidden = !open;
+  const btn = $('btn-settings');
+  btn.classList.toggle('on', open);
+  btn.setAttribute('aria-pressed', String(open));
+  btn.title = open ? 'Close settings' : 'Settings';
+  if (open) {
+    $('page-settings').scrollTop = 0;
+    showSettingsStatus('');
+    loadAutostart();
+    loadSettings();
+    loadAbout();
+  }
+}
+
+/** "claude-swap 0.26.0" or "2.1.295 (Claude Code)" → just the version. */
+const versionOf = (text) => text.match(/\d+(?:\.\d+)+\S*/)?.[0] || text;
+
+async function loadAbout() {
+  let about;
+  try {
+    about = await invoke('get_about');
+  } catch (err) {
+    $('about').replaceChildren(h('span', { class: 'muted' }, `Couldn't read versions: ${err}`));
+    return;
+  }
+  const tool = (label, t) => [
+    h('span', { class: 'k' }, label),
+    h(
+      'span',
+      { class: 'v', title: t?.error || null },
+      t?.version ? versionOf(t.version) : t?.error ? 'not found' : 'version unknown',
+      t?.path && h('span', { class: 'path', title: t.path }, t.path),
+    ),
+  ];
+  $('about').replaceChildren(
+    h('span', { class: 'k' }, 'Claude Swap Desktop'),
+    h('span', { class: 'v' }, about.portable ? `${about.appVersion} (portable)` : about.appVersion),
+    ...tool('claude-swap', about.claudeSwap),
+    ...tool('Claude Code', about.claude),
+  );
 }
 
 async function sendTestNotification() {
@@ -789,16 +855,19 @@ $('btn-refresh').addEventListener('click', refresh);
 $('btn-close').addEventListener('click', () => invoke('hide_window'));
 $('btn-quit').addEventListener('click', () => invoke('quit_app'));
 $('autostart').addEventListener('change', toggleAutostart);
-$('btn-settings').addEventListener('click', openSettings);
-$('settings-done').addEventListener('click', () => ($('sheet-settings').hidden = true));
+$('btn-settings').addEventListener('click', () => showSettings(!settingsOpen));
 $('btn-test-notification').addEventListener('click', sendTestNotification);
-for (const box of document.querySelectorAll('[data-setting]')) box.addEventListener('change', changeSetting);
-$('btn-tui').addEventListener('click', () => invoke('open_tui').catch((e) => alert(e)));
-$('btn-lock').addEventListener('click', () => {
-  locked = !locked;
-  savePref('locked', locked);
-  render();
-});
+for (const box of document.querySelectorAll('[data-setting]')) {
+  box.addEventListener('change', () => saveSettings({ [box.dataset.setting]: box.checked }));
+}
+$('refresh-minutes').addEventListener('change', (e) => saveSettings({ refreshMinutes: Number(e.target.value) }));
+for (const link of document.querySelectorAll('[data-link]')) {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    invoke('open_link', { kind: link.dataset.link }).catch((err) => showSettingsStatus(`Couldn't open it: ${err}`));
+  });
+}
+$('btn-lock').addEventListener('click', () => saveSettings({ lockSwitching: !locked }));
 $('btn-pin').addEventListener('click', () => {
   pinned = !pinned;
   invoke('set_pinned', { pinned });
@@ -824,14 +893,14 @@ $('relogin-done').addEventListener('click', () => ($('sheet-relogin').hidden = t
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!$('sheet-switch').hidden) $('sheet-switch').hidden = true;
-  else if (!$('sheet-settings').hidden) $('sheet-settings').hidden = true;
   else if (!$('sheet-map').hidden && !busy) $('sheet-map').hidden = true;
   else if (!$('sheet-unmap').hidden && !busy) $('sheet-unmap').hidden = true;
   else if (!$('sheet-relogin').hidden && !busy) $('sheet-relogin').hidden = true;
+  else if (settingsOpen && !document.querySelector('.sheet:not([hidden])')) showSettings(false);
 });
 
 listen('relogin-progress', (e) => onProgress(e.payload));
-// The background check (every 5 min) pushes fresh state while we're hidden.
+// The background check (Settings → Refresh every) pushes fresh state while we're hidden.
 listen('state-updated', (e) => {
   if (busy) return;
   state = e.payload;
@@ -849,3 +918,4 @@ setInterval(() => {
 render();
 refresh();
 loadAutostart();
+loadSettings();

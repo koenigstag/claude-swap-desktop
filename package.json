@@ -1,7 +1,7 @@
 {
   "name": "claude-swap-desktop",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Windows tray companion for claude-swap: usage, token health, switching and a guided re-login flow",
   "license": "MIT",
   "scripts": {

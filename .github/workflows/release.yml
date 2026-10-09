@@ -1,8 +1,8 @@
 name: Build and release
 
-# Manual runs build, test and keep the installer as a workflow artifact.
-# Pushing a tag like v1.2.3 (matching the app version) also creates a draft
-# GitHub release with the installer and SHA256SUMS.txt, published by hand.
+# Manual runs build, test and keep the installer and the portable exe as
+# workflow artifacts. Pushing a tag like v1.2.3 (matching the app version) also
+# creates a draft GitHub release with both and SHA256SUMS.txt, published by hand.
 on:
   workflow_dispatch:
   push:
@@ -53,22 +53,34 @@ jobs:
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: claude-swap-desktop_[version]_[arch]_[bundle]
 
-      - name: Checksums
+      # The portable exe is the same app binary the installer ships; the UI is
+      # embedded in it.
+      - name: Portable exe and checksums
         shell: pwsh
         run: |
           $v = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
-          "{0}  claude-swap-desktop_{1}_x64-setup.exe" -f (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower(), $v |
-            Set-Content -Encoding ascii SHA256SUMS.txt
+          $portable = "claude-swap-desktop_${v}_x64-portable.exe"
+          Copy-Item src-tauri/target/release/claude-swap-desktop.exe $portable
+          @(
+            "{0}  claude-swap-desktop_{1}_x64-setup.exe" -f (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower(), $v
+            "{0}  {1}" -f (Get-FileHash $portable -Algorithm SHA256).Hash.ToLower(), $portable
+          ) | Set-Content -Encoding ascii SHA256SUMS.txt
           Get-Content SHA256SUMS.txt
+          "PORTABLE=$portable" >> $env:GITHUB_ENV
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: claude-swap-desktop_portable
+          path: ${{ env.PORTABLE }}
 
       - uses: actions/upload-artifact@v7
         with:
           name: SHA256SUMS
           path: SHA256SUMS.txt
 
-      - name: Add checksums to the draft release
+      - name: Add the portable exe and checksums to the draft release
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload ${{ github.ref_name }} SHA256SUMS.txt --clobber
+        run: gh release upload ${{ github.ref_name }} ${{ env.PORTABLE }} SHA256SUMS.txt --clobber

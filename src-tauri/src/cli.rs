@@ -66,7 +66,6 @@ pub fn cswap_exe() -> Result<PathBuf, String> {
         &["claude-swap.exe", "cswap.exe"],
         &[
             h.join(".local").join("bin"),
-            PathBuf::from(r"C:\tools\direnv\bin"),
             h.join(r"AppData\Roaming\uv\tools\claude-swap\Scripts"),
         ],
     )

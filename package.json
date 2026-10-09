@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Windows tray companion for claude-swap: usage, token health, switching and a guided re-login flow",
+  "license": "MIT",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",

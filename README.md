@@ -7,6 +7,10 @@ Built with Tauri 2 (Rust + a plain HTML/JS popover, no frontend framework). The 
 The UI and flow were inspired by [Claude-Swap-Desktop](https://github.com/adithyanraj03/Claude-Swap-Desktop)
 (MIT). This is a separate implementation.
 
+> **Unofficial.** A community tool, not affiliated with or endorsed by Anthropic or the author of claude-swap.
+> "Claude" is a trademark of Anthropic. This app only drives the `claude-swap` and `claude` command-line tools
+> already on your machine and never reads or stores your credentials itself.
+
 ## What it does
 
 - **Accounts:** 5h / 7d / per-model usage from `claude-swap list --json`, plus token health per credential copy
@@ -39,8 +43,8 @@ It never touches credential files itself.
 
 ## Requirements
 
-Windows 10/11 with WebView2, `claude-swap` and `claude` (`claude.exe`) on PATH. `~/.local/bin` and
-`C:\tools\direnv\bin` are also checked.
+Windows 10/11 with WebView2, `claude-swap` and `claude` (`claude.exe`) on PATH. If they aren't on PATH,
+`~/.local/bin` and claude-swap's `uv tool` install folder are also checked.
 
 ## Develop
 
@@ -104,3 +108,7 @@ install. To update, run a newer installer over it, after quitting the app from t
   checkbox is disabled there.
 - **Single instance:** starting it again (Start menu or autostart) opens the running app's popover instead of adding
   a second tray icon.
+
+## License
+
+[MIT](LICENSE)

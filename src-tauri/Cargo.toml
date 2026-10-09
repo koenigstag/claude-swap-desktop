@@ -2,6 +2,8 @@
 name = "claude-swap-desktop"
 version = "0.1.0"
 description = "Windows tray companion for claude-swap"
+license = "MIT"
+repository = "https://github.com/koenigstag/claude-swap-desktop"
 edition = "2021"
 publish = false
 

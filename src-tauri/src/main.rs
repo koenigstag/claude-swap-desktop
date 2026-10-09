@@ -374,6 +374,62 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/* ----------------------------- autostart -------------------------------- */
+
+/// Running from an installed location, not a build folder (`…\target\…`).
+/// Only then is the exe path stable enough to register for startup.
+fn is_installed() -> bool {
+    std::env::current_exe()
+        .map(|p| !p.components().any(|c| c.as_os_str().eq_ignore_ascii_case("target")))
+        .unwrap_or(false)
+}
+
+/// Marker that the first-run default (start with Windows: on) was applied, so a
+/// later "off" from the user sticks.
+fn autostart_marker(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("autostart-initialized"))
+}
+
+fn mark_autostart_initialized(app: &AppHandle) {
+    if let Some(marker) = autostart_marker(app) {
+        if let Some(dir) = marker.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(marker, "");
+    }
+}
+
+fn enable_autostart_on_first_run(app: &AppHandle) {
+    use tauri_plugin_autostart::ManagerExt;
+    if !is_installed() || autostart_marker(app).is_some_and(|m| m.exists()) {
+        return;
+    }
+    if app.autolaunch().enable().is_ok() {
+        mark_autostart_initialized(app);
+    }
+}
+
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> Value {
+    use tauri_plugin_autostart::ManagerExt;
+    json!({
+        "installed": is_installed(),
+        "enabled": app.autolaunch().is_enabled().unwrap_or(false),
+    })
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    if !is_installed() {
+        return Err("Install the app first: a build-folder exe can't start with Windows".into());
+    }
+    let launcher = app.autolaunch();
+    if enabled { launcher.enable() } else { launcher.disable() }.map_err(|e| e.to_string())?;
+    mark_autostart_initialized(&app);
+    launcher.is_enabled().map_err(|e| e.to_string())
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     #[test]
@@ -392,6 +448,13 @@ mod tests {
 
 fn main() {
     tauri::Builder::default()
+        // First, so a second launch (Start menu, autostart racing a manual
+        // start) just opens the running app's popover and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_popover(app)))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
@@ -406,10 +469,13 @@ fn main() {
             set_pinned,
             open_tui,
             hide_window,
-            quit_app
+            quit_app,
+            get_autostart,
+            set_autostart
         ])
         .setup(|app| {
             build_tray(app.handle())?;
+            enable_autostart_on_first_run(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| match event {

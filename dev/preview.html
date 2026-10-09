@@ -68,6 +68,8 @@
                 case 'get_state': await wait(200); return state;
                 case 'relogin': return fakeRelogin(args);
                 case 'switch_account': await wait(500); return {};
+                case 'get_autostart': return { installed: true, enabled: true };
+                case 'set_autostart': return args.enabled;
                 case 'pick_folder': await wait(300); return 'D:\\Projects\\side-project';
                 case 'map_folder': {
                   await wait(400);

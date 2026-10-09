@@ -74,3 +74,17 @@ Installer (NSIS):
 ```bash
 npm run build
 ```
+
+## Install and start with Windows
+
+Run `src-tauri\target\release\bundle\nsis\Claude Swap Desktop_<version>_x64-setup.exe`. It installs per-user (no admin)
+to `%LOCALAPPDATA%\Claude Swap Desktop\`, with a Start menu shortcut and an uninstall entry. Add `/S` for a silent
+install. To update, run a newer installer over it, after quitting the app from the tray.
+
+- **Start with Windows** is turned on automatically the first time the *installed* app runs: a per-user
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry named "Claude Swap Desktop". Turn it off with the
+  checkbox in the popover footer, or in Task Manager → Startup apps. Once you've turned it off, it stays off.
+- A build run from `src-tauri\target\…` never registers itself, because that path changes on every rebuild. The
+  checkbox is disabled there.
+- **Single instance:** starting it again (Start menu or autostart) opens the running app's popover instead of adding
+  a second tray icon.

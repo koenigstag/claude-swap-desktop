@@ -629,6 +629,32 @@ async function startRelogin() {
   refresh();
 }
 
+/* ------------------------------ autostart ------------------------------ */
+
+async function loadAutostart() {
+  const box = $('autostart');
+  try {
+    const { installed, enabled } = await invoke('get_autostart');
+    box.checked = !!enabled;
+    box.disabled = !installed;
+    $('autostart-label').title = installed
+      ? 'Start Claude Swap in the tray when you sign in to Windows'
+      : 'Available in the installed app, not when running from a build folder';
+  } catch {
+    $('autostart-label').hidden = true;
+  }
+}
+
+async function toggleAutostart(e) {
+  const wanted = e.target.checked;
+  try {
+    e.target.checked = await invoke('set_autostart', { enabled: wanted });
+  } catch (err) {
+    e.target.checked = !wanted;
+    $('updated').textContent = `Start with Windows: ${err}`;
+  }
+}
+
 /* ------------------------------- wiring -------------------------------- */
 
 for (const btn of document.querySelectorAll('.tabs [data-tab]')) {
@@ -639,6 +665,7 @@ showTab(activeTab);
 $('btn-refresh').addEventListener('click', refresh);
 $('btn-close').addEventListener('click', () => invoke('hide_window'));
 $('btn-quit').addEventListener('click', () => invoke('quit_app'));
+$('autostart').addEventListener('change', toggleAutostart);
 $('btn-tui').addEventListener('click', () => invoke('open_tui').catch((e) => alert(e)));
 $('btn-lock').addEventListener('click', () => {
   locked = !locked;
@@ -677,6 +704,7 @@ document.addEventListener('keydown', (e) => {
 
 listen('relogin-progress', (e) => onProgress(e.payload));
 listen('popover-shown', () => {
+  loadAutostart(); // may have changed outside the app (Task Manager → Startup apps)
   if (!busy && (!state || Date.now() - (state.fetchedAt || 0) > 30_000)) refresh();
 });
 
@@ -686,3 +714,4 @@ setInterval(() => {
 
 render();
 refresh();
+loadAutostart();
